@@ -56,6 +56,17 @@
       b('dom4', 0.5, 'red', 'Reescrita ou leitura de texto-modelo'),
     ],
   };
+  // Rotina diária de hábitos (aba Rotina), em ordem de horário
+  const ROTINA = [
+    { id: 'acordar', t: '05:10', n: 'Acordar antes das 5:10', d: 'Levantar no primeiro alarme' },
+    { id: 'aej', t: null, n: 'AEJ', d: '30 min' },
+    { id: 'familia', t: null, n: 'Tempo de qualidade com a família', d: 'Presente, sem celular' },
+    { id: 'trabalho', t: '08:10', n: 'Estar no trabalho às 8:10', d: 'Chegar no horário' },
+    { id: 'treino', t: '16:00', n: 'Treinar às 16h', d: 'Musculação' },
+    { id: 'cardio', t: null, n: 'Cardio', d: '30 min' },
+    { id: 'estudo', t: '18:00', n: 'Estudos às 18h', d: 'Começar no horário' },
+    { id: 'cama', t: '22:30', n: 'Cama para dormir às 22:30', d: 'Deitar e desligar as telas' },
+  ];
   const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
   const DAY_LONG = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
   const DAY_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -122,6 +133,7 @@
     done: {},
     secs: {},
     rest: {},
+    habits: {},
     math: {},
     errors: [],
     essays: [],
@@ -161,7 +173,7 @@
     const d = defaults();
     if (!o || typeof o !== 'object') return d;
     const out = Object.assign(d, o);
-    ['done', 'secs', 'rest', 'math'].forEach((k) => { if (!out[k] || typeof out[k] !== 'object') out[k] = {}; });
+    ['done', 'secs', 'rest', 'habits', 'math'].forEach((k) => { if (!out[k] || typeof out[k] !== 'object') out[k] = {}; });
     ['errors', 'essays', 'sims'].forEach((k) => { if (!Array.isArray(out[k])) out[k] = []; });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(out.start || '')) out.start = DEFAULT_START;
     if (typeof out.updatedAt !== 'number') out.updatedAt = 0;
@@ -204,7 +216,7 @@
     if (PMRR.onSaved) PMRR.onSaved(state);
   }
   function hasData() {
-    return Object.keys(state.done).length || state.errors.length || state.essays.length || state.sims.length || Object.keys(state.math).length;
+    return Object.keys(state.done).length || Object.keys(state.habits).length || state.errors.length || state.essays.length || state.sims.length || Object.keys(state.math).length;
   }
 
   /* ------------------------------------------------------------------ cálculos */
@@ -240,6 +252,25 @@
     }
     return { cur, best: Math.max(best, cur) };
   }
+  const habitDone = (date, id) => !!(state.habits[date] && state.habits[date][id]);
+  const habitCount = (date) => ROTINA.reduce((n, x) => n + (habitDone(date, x.id) ? 1 : 0), 0);
+  const habitFull = (date) => habitCount(date) === ROTINA.length;
+  // Sequência de dias com todos os hábitos feitos; hoje ainda incompleto não quebra a sequência.
+  function habitStreak() {
+    const keys = Object.keys(state.habits).sort();
+    if (!keys.length) return { cur: 0, best: 0 };
+    const today = new Date();
+    const first = parseYmd(keys[0]);
+    let cur = 0;
+    let d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    if (!habitFull(ymd(d))) d = addDays(d, -1);
+    while (d >= first && habitFull(ymd(d))) { cur++; d = addDays(d, -1); }
+    let best = 0, run = 0;
+    for (let x = new Date(first); x <= today; x = addDays(x, 1)) {
+      if (habitFull(ymd(x))) { run++; best = Math.max(best, run); } else run = 0;
+    }
+    return { cur, best: Math.max(best, cur) };
+  }
   function weekIndexFor(date) {
     const w0 = mondayOf(parseYmd(state.start));
     const diff = Math.round((mondayOf(date) - w0) / (7 * 24 * 3600 * 1000));
@@ -247,7 +278,7 @@
   }
 
   /* ------------------------------------------------------------------ interface: estado de tela */
-  const ui = { tab: 'hoje', date: todayStr(), weekOffset: 0, reg: 'erros', onlyPending: false };
+  const ui = { tab: 'hoje', date: todayStr(), rdate: todayStr(), weekOffset: 0, reg: 'erros', onlyPending: false };
   const app = document.getElementById('app');
   const navEl = document.getElementById('nav');
   const pill = document.getElementById('pill');
@@ -617,6 +648,48 @@
     </div>`;
   }
 
+  function viewRotina() {
+    const date = ui.rdate;
+    const d = parseYmd(date);
+    const isToday = date === todayStr();
+    const n = habitCount(date);
+    const total = ROTINA.length;
+    const st = habitStreak();
+    const slots = ROTINA.map((x) => `<span class="slot ${habitDone(date, x.id) ? 'is-done' : ''}" style="--sc:var(--accent)"></span>`).join('');
+    const cards = ROTINA.map((x) => {
+      const done = habitDone(date, x.id);
+      return `
+      <article class="block hab ${done ? 'is-done' : ''}" style="--sc:var(--accent)">
+        <button type="button" class="check" data-act="habit" data-id="${x.id}" aria-pressed="${done}" aria-label="${done ? 'Desmarcar' : 'Marcar como feito'}: ${esc(x.n)}">${CHECK_SVG}</button>
+        <div>
+          <h3>${esc(x.n)}</h3>
+          <p class="foco">${esc(x.d)}</p>
+          ${x.t ? `<p class="b-meta"><span>Meta: ${x.t}</span></p>` : ''}
+        </div>
+      </article>`;
+    }).join('');
+    return `
+    <div class="stack">
+      <div class="daynav">
+        <button type="button" class="btn sm" data-act="rday" data-n="-1" aria-label="Dia anterior">Anterior</button>
+        <button type="button" class="btn sm" data-act="rday" data-n="1" aria-label="Próximo dia">Próximo</button>
+        ${isToday ? '' : '<button type="button" class="btn sm ghost" data-act="rtoday">Voltar para hoje</button>'}
+      </div>
+      <section class="hero">
+        <div class="hero-row">
+          <div>
+            <h1>${DAY_LONG[d.getDay()]}</h1>
+            <p class="date">${fmtLong(d)}${isToday ? ', hoje' : ''}</p>
+          </div>
+          <div class="hero-stat"><strong>${n}</strong><span>de ${total} hábitos</span></div>
+        </div>
+        <div class="slots" aria-hidden="true">${slots}</div>
+        <p class="streak"><span>Sequência: <b>${st.cur}</b> ${st.cur === 1 ? 'dia' : 'dias'}</span><span>Melhor: <b>${st.best}</b></span><span>Dia vale com todos os hábitos</span></p>
+      </section>
+      ${cards}
+    </div>`;
+  }
+
   function weekData(offset) {
     const mon = addDays(mondayOf(new Date()), 7 * offset);
     const days = WEEK_ORDER.map((_, i) => addDays(mon, i));
@@ -865,6 +938,7 @@
     let html = '';
     if (ui.tab === 'hoje') html = viewHoje();
     else if (ui.tab === 'semana') html = viewSemana();
+    else if (ui.tab === 'rotina') html = viewRotina();
     else if (ui.tab === 'mat') html = viewMat();
     else if (ui.tab === 'reg') html = viewReg();
     else html = viewDados();
@@ -886,6 +960,7 @@
     if (!bt) return;
     ui.tab = bt.dataset.tab;
     if (ui.tab === 'hoje') ui.date = todayStr();
+    if (ui.tab === 'rotina') ui.rdate = todayStr();
     render();
     window.scrollTo(0, 0);
   });
@@ -915,6 +990,20 @@
         if (el && el.getAttribute('aria-pressed') === 'true') { el.classList.add('just'); el.focus(); }
         break;
       }
+      case 'habit': {
+        const date = ui.rdate;
+        state.habits[date] = state.habits[date] || {};
+        if (state.habits[date][id]) delete state.habits[date][id];
+        else state.habits[date][id] = true;
+        if (!Object.keys(state.habits[date]).length) delete state.habits[date];
+        save();
+        render();
+        const el = app.querySelector(`.check[data-id="${id}"]`);
+        if (el && el.getAttribute('aria-pressed') === 'true') { el.classList.add('just'); el.focus(); }
+        break;
+      }
+      case 'rday': ui.rdate = ymd(addDays(parseYmd(ui.rdate), Number(t.dataset.n))); render(); break;
+      case 'rtoday': ui.rdate = todayStr(); render(); break;
       case 'timer': {
         audioUnlock();
         if (!(state.timer && state.timer.id === id && state.timer.date === ui.date)) pomoStart(id, ui.date);

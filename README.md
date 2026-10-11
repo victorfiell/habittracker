@@ -35,6 +35,10 @@ Abra o site, vá em **Dados**, clique em **Criar conta** e depois **Entrar**. Se
 - **Apagar todos os dados** também apaga na nuvem.
 - O backup em arquivo JSON (aba Dados) continua disponível.
 
+## Rotina
+
+A aba **Rotina** é um checklist diário de hábitos (acordar antes das 5:10, AEJ, família, trabalho às 8:10, treino às 16h, cardio, estudos às 18h e cama às 22:30). Marque os que fez em cada dia; a sequência conta os dias com todos os hábitos feitos. A lista fica em `ROTINA` no `app.js` e as marcas sincronizam com a conta junto do resto dos dados.
+
 ## Pomodoro
 
 O botão **Iniciar** de cada bloco abre a tela do Pomodoro: foco, pausa curta e pausa longa depois de alguns focos. Só o tempo de foco entra em "cronometrados" do bloco; as pausas não contam. Ao fim de cada fase o app avisa (som e vibração) e espera você tocar em Iniciar para a próxima. **Voltar ao app** minimiza a tela sem parar o cronômetro (a pílula no topo mostra o tempo e reabre a tela). Em **Ajustes** ficam as durações, os focos até a pausa longa, o som e a vibração; a última configuração fica salva na conta e vale em todos os aparelhos. A vibração só funciona no Android.

@@ -1,5 +1,5 @@
 // Cache simples para uso offline. Troque a versão ao publicar mudanças.
-const CACHE = 'pmrr-tracker-v3';
+const CACHE = 'pmrr-tracker-v4';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'sync.js', 'config.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
