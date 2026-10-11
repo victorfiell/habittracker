@@ -1,0 +1,16 @@
+{
+  "name": "Rotina PM RR",
+  "short_name": "Rotina PM RR",
+  "description": "Rotina de estudos e acompanhamento diário para o concurso da PM RR.",
+  "lang": "pt-BR",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0F2038",
+  "theme_color": "#0F2038",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
