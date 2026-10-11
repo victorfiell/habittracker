@@ -35,6 +35,10 @@ Abra o site, vá em **Dados**, clique em **Criar conta** e depois **Entrar**. Se
 - **Apagar todos os dados** também apaga na nuvem.
 - O backup em arquivo JSON (aba Dados) continua disponível.
 
+## Pomodoro
+
+O botão **Iniciar** de cada bloco abre a tela do Pomodoro: foco, pausa curta e pausa longa depois de alguns focos. Só o tempo de foco entra em "cronometrados" do bloco; as pausas não contam. Ao fim de cada fase o app avisa (som e vibração) e espera você tocar em Iniciar para a próxima. **Voltar ao app** minimiza a tela sem parar o cronômetro (a pílula no topo mostra o tempo e reabre a tela). Em **Ajustes** ficam as durações, os focos até a pausa longa, o som e a vibração; a última configuração fica salva na conta e vale em todos os aparelhos. A vibração só funciona no Android.
+
 ## Como o site conta a sequência
 
 Um dia entra na sequência quando você cumpre pelo menos 75% das horas planejadas. Folga não quebra a sequência nem soma. Para mudar, edite `STREAK_MIN` no início do `app.js`.

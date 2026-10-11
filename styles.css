@@ -124,8 +124,7 @@ h3.sub { font-family: var(--font-head); font-weight: 600; font-size: 20px; margi
 .check.just { animation: stamp 0.28s ease-out; }
 @keyframes stamp { from { transform: scale(1.5) rotate(-14deg); opacity: 0.4; } to { transform: scale(1) rotate(0); opacity: 1; } }
 .timer-btn { min-width: 84px; height: 40px; border: 1px solid var(--line); background: transparent; border-radius: 6px; padding: 0 10px; font-size: 14px; font-variant-numeric: tabular-nums; }
-.timer-btn.running { background: var(--warn); border-color: var(--warn); color: #fff; }
-@media (prefers-color-scheme: dark) { .timer-btn.running { color: #0d1620; } }
+.timer-btn.running { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 @media (max-width: 420px) {
   .block { grid-template-columns: auto 1fr; }
   .timer-btn { grid-column: 1 / -1; width: 100%; }
@@ -192,8 +191,28 @@ svg.chart .ln { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-lin
 svg.chart .dot { fill: var(--accent); }
 svg.chart text { fill: var(--muted); font-size: 11px; font-family: var(--font-body); }
 
+/* pomodoro */
+body.pomo-open { overflow: hidden; }
+.pomo { position: fixed; inset: 0; z-index: 20; overflow-y: auto; background-color: var(--bg); background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 28px 28px; padding: calc(12px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom)); }
+.pomo[hidden] { display: none; }
+.pomo-in { max-width: 480px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; text-align: center; }
+.pomo-top { display: flex; justify-content: space-between; gap: 8px; }
+.pomo h2 { font-family: var(--font-head); font-weight: 700; font-size: 30px; line-height: 1.1; margin-top: 12px; outline: none; }
+.pomo-phase { font-size: 17px; color: var(--sc); font-weight: 600; }
+.pomo-clock { font-family: var(--font-head); font-weight: 700; font-size: clamp(88px, 28vw, 150px); line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.pomo-bar { height: 10px; background: var(--line); border-radius: 5px; overflow: hidden; }
+.pomo-bar i { display: block; height: 100%; width: 0; background: var(--sc); border-radius: 5px; transition: width 0.9s linear; }
+.pomo .slots { justify-content: center; }
+.pomo .slot { max-width: 56px; }
+.slot.is-cur { border-color: var(--sc); }
+.pomo-btns { display: grid; gap: 10px; margin-top: 6px; }
+.btn.big { min-height: 56px; font-size: 20px; }
+.pomo-set { text-align: left; }
+.chk { display: flex; align-items: center; gap: 10px; font-weight: 400; }
+.chk input { width: 22px; height: 22px; flex: none; }
+
 /* toast */
-#toast { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 6px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s; z-index: 9; max-width: calc(100% - 32px); }
+#toast { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 6px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s; z-index: 30; max-width: calc(100% - 32px); }
 @media (prefers-color-scheme: dark) { #toast { background: #e7edf3; color: #0d1620; } }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 

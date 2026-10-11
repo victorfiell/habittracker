@@ -74,6 +74,12 @@
   ];
   const ERR_SUBJ = ['Matemática', 'Português', 'Direito e Legislação', 'Redação', 'Outra'];
 
+  // Pomodoro: valores padrão e limites de cada ajuste
+  const POMO_DEF = { focus: 25, short: 5, long: 15, cycles: 4, sound: true, vibrate: true };
+  const POMO_RANGE = { focus: [1, 120], short: [1, 60], long: [1, 60], cycles: [2, 10] };
+  const POMO_PHASE = { focus: 'Foco', short: 'Pausa curta', long: 'Pausa longa' };
+  const BASE_TITLE = document.title;
+
   /* ------------------------------------------------------------------ utilidades */
   const pad2 = (n) => String(n).padStart(2, '0');
   const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -121,6 +127,7 @@
     essays: [],
     sims: [],
     timer: null,
+    pomo: { cfg: Object.assign({}, POMO_DEF) },
     lastExport: null,
     updatedAt: 0, // ms; usado para decidir qual cópia (local ou nuvem) é a mais nova
   });
@@ -135,6 +142,7 @@
       state = normalize(o);
       try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* ignora */ }
       render();
+      renderPomo();
     },
   });
 
@@ -157,7 +165,34 @@
     ['errors', 'essays', 'sims'].forEach((k) => { if (!Array.isArray(out[k])) out[k] = []; });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(out.start || '')) out.start = DEFAULT_START;
     if (typeof out.updatedAt !== 'number') out.updatedAt = 0;
+    out.pomo = { cfg: normPomoCfg(o.pomo && o.pomo.cfg) };
+    out.timer = normTimer(out);
     return out;
+  }
+  function normPomoCfg(c) {
+    const cfg = Object.assign({}, POMO_DEF);
+    if (!c || typeof c !== 'object') return cfg;
+    Object.keys(POMO_RANGE).forEach((k) => {
+      const n = Math.round(Number(c[k]));
+      if (Number.isFinite(n)) cfg[k] = Math.max(POMO_RANGE[k][0], Math.min(POMO_RANGE[k][1], n));
+    });
+    ['sound', 'vibrate'].forEach((k) => { if (typeof c[k] === 'boolean') cfg[k] = c[k]; });
+    return cfg;
+  }
+  // Cronômetro salvo por versão antiga (sem fase) ou inválido: credita o tempo e descarta.
+  function normTimer(s) {
+    const t = s.timer;
+    if (!t || typeof t !== 'object' || !t.id || !t.date) return null;
+    if (POMO_PHASE[t.phase]) {
+      const ok = t.paused ? Number.isFinite(t.remaining) : Number.isFinite(t.phaseEnd);
+      if (ok) return t;
+    }
+    const el = Math.round((Date.now() - (t.startedAt || Date.now())) / 1000);
+    if (el > 0 && el < 12 * 3600) {
+      s.secs[t.date] = s.secs[t.date] || {};
+      s.secs[t.date][t.id] = (s.secs[t.date][t.id] || 0) + el;
+    }
+    return null;
   }
   function save() {
     state.updatedAt = Date.now();
@@ -229,50 +264,298 @@
   PMRR.toast = toast;
 
   /* ------------------------------------------------------------------ cronômetro */
-  const timerElapsed = () => (state.timer ? (Date.now() - state.timer.startedAt) / 1000 : 0);
-  function startTimer(id, date) {
+  // state.timer = { id, date, phase, cycle, paused, waiting, phaseEnd, remaining, startedAt }
+  //  - phaseEnd: prazo da fase em ms (só quando rodando); remaining: ms que faltam (só quando parado)
+  //  - startedAt: início do trecho de foco ainda não creditado em state.secs (null em pausa e intervalos)
+  //  - waiting: a fase anterior acabou e a próxima espera o toque em Iniciar
+  const timerElapsed = () => (state.timer && state.timer.startedAt ? (Date.now() - state.timer.startedAt) / 1000 : 0);
+  const phaseMs = (phase) => state.pomo.cfg[phase] * 60000;
+  const remainingMs = () => {
+    const t = state.timer;
+    return t.paused ? t.remaining : Math.max(0, t.phaseEnd - Date.now());
+  };
+
+  // soma ao bloco o foco ainda não creditado, até o instante `until` (ou agora)
+  function creditFocus(until) {
+    const t = state.timer;
+    if (!t || !t.startedAt) return 0;
+    const end = until == null ? Date.now() : Math.min(Date.now(), until);
+    const el = Math.max(0, Math.round((end - t.startedAt) / 1000));
+    state.secs[t.date] = state.secs[t.date] || {};
+    state.secs[t.date][t.id] = (state.secs[t.date][t.id] || 0) + el;
+    t.startedAt = null;
+    return el;
+  }
+  function pomoStart(id, date) {
     if (state.timer) stopTimer(true);
-    state.timer = { id, date, startedAt: Date.now() };
+    const now = Date.now();
+    state.timer = { id, date, phase: 'focus', cycle: 1, paused: false, waiting: false, phaseEnd: now + phaseMs('focus'), remaining: 0, startedAt: now };
     save();
   }
   function stopTimer(silent) {
     if (!state.timer) return;
-    const t = state.timer;
-    const el = Math.round((Date.now() - t.startedAt) / 1000);
-    state.secs[t.date] = state.secs[t.date] || {};
-    state.secs[t.date][t.id] = (state.secs[t.date][t.id] || 0) + Math.max(0, el);
+    const el = creditFocus();
     state.timer = null;
     save();
-    if (!silent) toast(`Registrado: ${fmtSecs(el)}`);
+    if (!silent) toast(el ? `Registrado: ${fmtSecs(el)}` : 'Sessão encerrada.');
   }
-  function blockLabel(id) {
+  function pomoPause() {
+    const t = state.timer;
+    if (!t || t.paused) return;
+    creditFocus();
+    t.remaining = remainingMs();
+    t.paused = true;
+    t.waiting = false;
+    t.phaseEnd = null;
+    save();
+  }
+  function pomoResume() {
+    const t = state.timer;
+    if (!t || !t.paused) return;
+    const now = Date.now();
+    t.phaseEnd = now + t.remaining;
+    t.paused = false;
+    t.waiting = false;
+    t.startedAt = t.phase === 'focus' ? now : null;
+    save();
+  }
+  // encerra a fase atual e deixa a próxima esperando o toque em Iniciar
+  function pomoPhaseEnd(endedAt, withAlert) {
+    const t = state.timer;
+    if (!t) return;
+    const c = state.pomo.cfg;
+    if (t.phase === 'focus') {
+      creditFocus(endedAt);
+      t.phase = t.cycle >= c.cycles ? 'long' : 'short';
+    } else {
+      t.cycle = t.phase === 'long' ? 1 : t.cycle + 1;
+      t.phase = 'focus';
+    }
+    t.paused = true;
+    t.waiting = true;
+    t.phaseEnd = null;
+    t.remaining = phaseMs(t.phase);
+    save();
+    if (withAlert) pomoAlert();
+  }
+  function pomoCheck() {
+    const t = state.timer;
+    if (!t || t.paused || t.phaseEnd == null || Date.now() < t.phaseEnd) return false;
+    pomoPhaseEnd(t.phaseEnd, Date.now() - t.phaseEnd < 10000);
+    return true;
+  }
+
+  /* aviso de fim de fase */
+  let audioCtx = null;
+  function audioUnlock() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = audioCtx || new AC();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { /* sem áudio */ }
+  }
+  function beep() {
+    if (!audioCtx) return;
+    try {
+      const t0 = audioCtx.currentTime;
+      [0, 0.28, 0.56].forEach((d) => {
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.frequency.value = 880;
+        g.gain.setValueAtTime(0.0001, t0 + d);
+        g.gain.exponentialRampToValueAtTime(0.35, t0 + d + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.22);
+        o.connect(g);
+        g.connect(audioCtx.destination);
+        o.start(t0 + d);
+        o.stop(t0 + d + 0.24);
+      });
+    } catch (e) { /* sem áudio */ }
+  }
+  function pomoAlert() {
+    const c = state.pomo.cfg;
+    if (c.sound) beep();
+    if (c.vibrate && navigator.vibrate) { try { navigator.vibrate([300, 150, 300, 150, 300]); } catch (e) { /* ignora */ } }
+    toast(state.timer && state.timer.phase === 'focus' ? 'Fim da pausa. Hora de focar.' : 'Foco concluído. Hora da pausa.');
+  }
+
+  /* mantém a tela acesa durante o foco, quando o navegador permite */
+  let wake = null;
+  function syncWake() {
+    const on = state.timer && !state.timer.paused && !pomoEl.hidden;
+    try {
+      if (on && !wake && 'wakeLock' in navigator) {
+        navigator.wakeLock.request('screen').then((w) => { wake = w; w.addEventListener('release', () => { wake = null; }); }).catch(() => {});
+      } else if (!on && wake) {
+        wake.release();
+        wake = null;
+      }
+    } catch (e) { /* ignora */ }
+  }
+
+  function blockInfo(id) {
     for (const k of Object.keys(PLAN)) {
       const f = PLAN[k].find((x) => x.id === id);
-      if (f) return SUBJ[f.s].n;
+      if (f) return SUBJ[f.s];
     }
-    return '';
+    return { n: '', c: 'var(--accent)' };
   }
+  const blockLabel = (id) => blockInfo(id).n;
+
   function tick() {
+    if (pomoCheck()) { renderPomo(); if (ui.tab === 'hoje') render(); }
     document.querySelectorAll('[data-live]').forEach((el) => {
       const [date, id] = el.getAttribute('data-live').split('|');
       let s = secsOf(date, id);
       if (state.timer && state.timer.id === id && state.timer.date === date) s += timerElapsed();
       el.textContent = fmtSecs(s) + ' cronometrados';
     });
-    document.querySelectorAll('[data-live-clock]').forEach((el) => {
-      el.textContent = state.timer ? fmtClock(timerElapsed()) : '';
-    });
     renderPill();
+    pomoClock();
   }
   function renderPill() {
     if (state.timer) {
       pill.hidden = false;
-      pill.textContent = `${blockLabel(state.timer.id)} ${fmtClock(timerElapsed())}`;
+      pill.textContent = `${state.timer.paused ? 'Pausado' : POMO_PHASE[state.timer.phase]} ${fmtClock(Math.ceil(remainingMs() / 1000))}`;
     } else {
       pill.hidden = true;
     }
   }
   setInterval(() => { if (state.timer) tick(); }, 1000);
+
+  /* ------------------------------------------------------------------ tela do Pomodoro */
+  const pomoEl = document.createElement('div');
+  pomoEl.id = 'pomo';
+  pomoEl.className = 'pomo';
+  pomoEl.hidden = true;
+  pomoEl.setAttribute('role', 'dialog');
+  pomoEl.setAttribute('aria-modal', 'true');
+  pomoEl.setAttribute('aria-label', 'Pomodoro');
+  document.body.appendChild(pomoEl);
+
+  function openPomo() {
+    if (!state.timer) return;
+    ui.pomoOpen = true;
+    ui.pomoSettings = false;
+    renderPomo();
+    const h = pomoEl.querySelector('h2');
+    if (h) h.focus();
+  }
+  function closePomo() {
+    ui.pomoOpen = false;
+    renderPomo();
+  }
+  function pomoClock() {
+    const t = state.timer;
+    if (!t) { if (document.title !== BASE_TITLE) document.title = BASE_TITLE; return; }
+    const ms = remainingMs();
+    const txt = fmtClock(Math.ceil(ms / 1000));
+    document.title = `${txt} · ${POMO_PHASE[t.phase]}`;
+    const clock = pomoEl.querySelector('[data-pclock]');
+    if (clock) clock.textContent = txt;
+    const bar = pomoEl.querySelector('[data-pbar]');
+    if (bar) bar.style.width = `${Math.min(100, Math.max(0, 100 * (1 - ms / phaseMs(t.phase))))}%`;
+  }
+  function renderPomo() {
+    const t = state.timer;
+    if (!t || !ui.pomoOpen) {
+      pomoEl.hidden = true;
+      pomoEl.innerHTML = '';
+      document.body.classList.remove('pomo-open');
+      syncWake();
+      pomoClock();
+      return;
+    }
+    const c = state.pomo.cfg;
+    const info = blockInfo(t.id);
+    const label = t.paused ? (t.waiting ? (t.phase === 'focus' ? 'Iniciar foco' : 'Iniciar pausa') : 'Continuar') : 'Pausar';
+    const marks = Array.from({ length: c.cycles }, (_, i) => {
+      const n = i + 1;
+      const done = n < t.cycle || (n === t.cycle && t.phase !== 'focus');
+      const cur = n === t.cycle && t.phase === 'focus';
+      return `<span class="slot ${done ? 'is-done' : ''} ${cur ? 'is-cur' : ''}" style="--sc:${info.c}"></span>`;
+    }).join('');
+    const num = (k, name, unit) => `<div><label for="pc-${k}">${name}${unit ? ` (${unit})` : ''}</label><input id="pc-${k}" type="number" inputmode="numeric" min="${POMO_RANGE[k][0]}" max="${POMO_RANGE[k][1]}" value="${c[k]}" data-pcfg="${k}"></div>`;
+    const settings = ui.pomoSettings ? `
+      <section class="card stack pomo-set" aria-label="Ajustes do Pomodoro">
+        <div class="fields two">${num('focus', 'Foco', 'min')}${num('cycles', 'Focos até a pausa longa', '')}</div>
+        <div class="fields two">${num('short', 'Pausa curta', 'min')}${num('long', 'Pausa longa', 'min')}</div>
+        <label class="chk"><input type="checkbox" data-pcfg="sound" ${c.sound ? 'checked' : ''}> Som ao fim de cada fase</label>
+        <label class="chk"><input type="checkbox" data-pcfg="vibrate" ${c.vibrate ? 'checked' : ''}> Vibração ao fim de cada fase</label>
+        <div><button type="button" class="btn sm" data-pa="test">Testar aviso</button></div>
+        <p class="small muted">As mudanças valem a partir da próxima fase e ficam salvas na sua conta.</p>
+      </section>` : '';
+    pomoEl.innerHTML = `
+      <div class="pomo-in" style="--sc:${info.c}">
+        <div class="pomo-top">
+          <button type="button" class="btn sm" data-pa="min">Voltar ao app</button>
+          <button type="button" class="btn sm ${ui.pomoSettings ? 'primary' : ''}" data-pa="set" aria-pressed="${!!ui.pomoSettings}">Ajustes</button>
+        </div>
+        <h2 tabindex="-1">${esc(info.n)}</h2>
+        <p class="pomo-phase">${POMO_PHASE[t.phase]}${t.waiting ? ' (aguardando)' : t.paused ? ' (pausado)' : ''}</p>
+        <p class="pomo-clock" data-pclock aria-live="off">${fmtClock(Math.ceil(remainingMs() / 1000))}</p>
+        <div class="pomo-bar" aria-hidden="true"><i data-pbar></i></div>
+        <div class="slots" role="img" aria-label="Foco ${Math.min(t.cycle, c.cycles)} de ${c.cycles}">${marks}</div>
+        <div class="pomo-btns">
+          <button type="button" class="btn primary big" data-pa="toggle">${label}</button>
+          <button type="button" class="btn" data-pa="skip">Pular fase</button>
+          <button type="button" class="btn danger" data-pa="stop">Encerrar</button>
+        </div>
+        ${settings}
+      </div>`;
+    pomoEl.hidden = false;
+    document.body.classList.add('pomo-open');
+    syncWake();
+    pomoClock();
+  }
+
+  pomoEl.addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-pa]');
+    if (!b) return;
+    audioUnlock();
+    switch (b.dataset.pa) {
+      case 'toggle':
+        if (state.timer.paused) pomoResume(); else pomoPause();
+        renderPomo(); render();
+        break;
+      case 'skip':
+        pomoPhaseEnd(Date.now(), false);
+        renderPomo(); render();
+        break;
+      case 'stop':
+        if (confirm('Encerrar a sessão? O foco já cronometrado fica registrado.')) {
+          stopTimer();
+          ui.pomoOpen = false;
+          renderPomo(); render();
+        }
+        break;
+      case 'min': closePomo(); break;
+      case 'set': ui.pomoSettings = !ui.pomoSettings; renderPomo(); break;
+      case 'test': beep(); if (navigator.vibrate && state.pomo.cfg.vibrate) navigator.vibrate(200); break;
+      default: break;
+    }
+  });
+  pomoEl.addEventListener('change', (ev) => {
+    const k = ev.target.dataset && ev.target.dataset.pcfg;
+    if (!k || !(k in POMO_DEF)) return;
+    const c = state.pomo.cfg;
+    if (typeof POMO_DEF[k] === 'boolean') c[k] = ev.target.checked;
+    else {
+      const n = Math.round(Number(ev.target.value));
+      c[k] = Number.isFinite(n) ? Math.max(POMO_RANGE[k][0], Math.min(POMO_RANGE[k][1], n)) : POMO_DEF[k];
+    }
+    if (state.timer && state.timer.waiting) state.timer.remaining = phaseMs(state.timer.phase);
+    save();
+    renderPomo();
+  });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !pomoEl.hidden) closePomo(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || !state.timer) return;
+    pomoCheck();
+    renderPomo();
+    if (ui.tab === 'hoje') render();
+  });
 
   /* ------------------------------------------------------------------ telas */
   const CHECK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
@@ -305,7 +588,7 @@
           <p class="foco">${esc(x.f)}</p>
           <p class="b-meta"><span>${fmtH(x.h)} planejado</span><span data-live="${date}|${x.id}">${fmtSecs(secs)} cronometrados</span></p>
         </div>
-        <button type="button" class="timer-btn ${running ? 'running' : ''}" data-act="timer" data-id="${x.id}">${running ? 'Parar' : 'Iniciar'}</button>
+        <button type="button" class="timer-btn ${running ? 'running' : ''}" data-act="timer" data-id="${x.id}">${running ? 'Abrir' : 'Iniciar'}</button>
       </article>`;
     }).join('');
 
@@ -593,6 +876,7 @@
     const idx = weekIndexFor(new Date());
     brandSub.textContent = idx >= 1 ? `Semana ${idx}` : `Começa em ${fmtDateBr(state.start)}`;
     renderPill();
+    if (!state.timer && !pomoEl.hidden) renderPomo(); // apagar dados ou restaurar backup com a tela aberta
     if (PMRR.afterRender) PMRR.afterRender();
   }
 
@@ -610,6 +894,7 @@
     ui.tab = 'hoje';
     ui.date = state.timer.date;
     render();
+    openPomo();
   });
 
   app.addEventListener('click', (ev) => {
@@ -631,9 +916,10 @@
         break;
       }
       case 'timer': {
-        if (state.timer && state.timer.id === id && state.timer.date === ui.date) stopTimer();
-        else startTimer(id, ui.date);
+        audioUnlock();
+        if (!(state.timer && state.timer.id === id && state.timer.date === ui.date)) pomoStart(id, ui.date);
         render();
+        openPomo();
         break;
       }
       case 'day': ui.date = ymd(addDays(parseYmd(ui.date), Number(t.dataset.n))); render(); break;
@@ -766,5 +1052,6 @@
   if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+  pomoCheck(); // fase que acabou com o app fechado
   render();
 })();
